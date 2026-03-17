@@ -1,0 +1,11 @@
+.env
+.venv/
+LINKEDIN_DRAFT.md
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/

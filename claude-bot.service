@@ -1,0 +1,29 @@
+# Systemd service for Telegram Claude Code Bot
+#
+# Install:
+#   1. Edit User, WorkingDirectory, and ExecStart paths below
+#   2. Copy to systemd:
+#        sudo cp claude-bot.service /etc/systemd/system/
+#   3. Enable and start:
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable claude-bot
+#        sudo systemctl start claude-bot
+#   4. Check status:
+#        sudo systemctl status claude-bot
+#        journalctl -u claude-bot -f
+
+[Unit]
+Description=Telegram Claude Code Bot
+After=network.target
+
+[Service]
+Type=simple
+User=olegab
+WorkingDirectory=/home/olegab/my_claude_code_claw
+ExecStart=/home/olegab/my_claude_code_claw/.venv/bin/python bot.py
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/home/olegab/my_claude_code_claw/.env
+
+[Install]
+WantedBy=multi-user.target

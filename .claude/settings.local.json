@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m json.tool)",
+      "Bash(which node:*)",
+      "Bash(pkill:*)",
+      "Bash(curl:*)",
+      "Bash(nslookup:*)",
+      "Bash(strace:*)",
+      "Bash(timeout 30 /Users/olegab/.local/bin/claude --print --dangerously-skip-permissions 'say hi')",
+      "Bash(echo exit=$?)",
+      "Read(//tmp/**)",
+      "Bash(/Users/olegab/.local/bin/claude --print --dangerously-skip-permissions 'say hi')",
+      "Read(//private/tmp/**)",
+      "Bash(npm start:*)"
+    ]
+  }
+}
