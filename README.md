@@ -39,6 +39,7 @@ python bot.py
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | *(required)* | Bot token from BotFather |
 | `CLAUDE_BIN` | `~/.local/bin/claude` | Path to Claude Code binary |
+| `GROQ_API_KEY` | *(optional)* | Groq API key for voice transcription ([get one free](https://console.groq.com)) |
 
 ## Commands
 
@@ -47,6 +48,7 @@ python bot.py
 | `/start` | Welcome message |
 | `/cancel` | Stop the current Claude Code task |
 | *(any text)* | Run as a Claude Code prompt |
+| *(voice message)* | Transcribe via Groq Whisper, then run as a prompt |
 
 ## Run as a Service (VM)
 

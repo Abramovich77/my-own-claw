@@ -66,6 +66,16 @@ CLAUDE_BIN=/usr/local/bin/claude
 
 Find your Claude binary path with `which claude`.
 
+### Voice Messages (Optional)
+
+To enable voice-to-text, get a free API key at [console.groq.com](https://console.groq.com) and add it:
+
+```
+GROQ_API_KEY=gsk_your_key_here
+```
+
+Without this key the bot still works for text -- voice messages will just get a "not configured" reply.
+
 ## 5. Install Python Dependencies
 
 ```bash
