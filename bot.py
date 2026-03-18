@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,8 +22,15 @@ if not TOKEN:
     raise SystemExit("TELEGRAM_BOT_TOKEN is not set in .env")
 
 CLAUDE_BIN = os.getenv("CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
-WORK_DIR = str(Path(__file__).resolve().parent)
+BOT_DIR = str(Path(__file__).resolve().parent)
+CLAUDE_WORK_DIR = os.getenv("CLAUDE_WORK_DIR", os.path.expanduser("~/workspace"))
+UPLOADS_DIR = Path(CLAUDE_WORK_DIR) / "uploads"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+_allowed_raw = os.getenv("ALLOWED_USERS", "")
+ALLOWED_USERS: set[int] = {
+    int(uid.strip()) for uid in _allowed_raw.split(",") if uid.strip()
+}
 
 groq_client = None
 if GROQ_API_KEY:
@@ -36,8 +44,23 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 active_sessions: dict[int, asyncio.subprocess.Process] = {}
+pending_photos: dict[int, str] = {}
 
 MAX_MSG_LEN = 4000
+
+
+async def check_authorized(update: Update) -> bool:
+    if not ALLOWED_USERS:
+        return True
+    if update.effective_user.id in ALLOWED_USERS:
+        return True
+    log.warning(
+        "[auth] Rejected user_id=%s username=%s",
+        update.effective_user.id,
+        update.effective_user.username,
+    )
+    await update.message.reply_text("Unauthorized. Your user ID is not in ALLOWED_USERS.")
+    return False
 
 
 def split_message(text: str, max_len: int = MAX_MSG_LEN) -> list[str]:
@@ -105,7 +128,7 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
             prompt,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=WORK_DIR,
+            cwd=CLAUDE_WORK_DIR,
         )
     except FileNotFoundError:
         await update.message.reply_text(
@@ -132,13 +155,22 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
 
 
 async def handle_message(update: Update, _) -> None:
+    if not await check_authorized(update):
+        return
     chat_id = update.effective_chat.id
     prompt = update.message.text
     log.info("[msg] chat_id=%s text=%r", chat_id, prompt[:80])
+
+    photo_path = pending_photos.pop(chat_id, None)
+    if photo_path:
+        prompt = f"Regarding the image at {photo_path}: {prompt}"
+
     await run_claude(update, chat_id, prompt)
 
 
 async def handle_voice(update: Update, _) -> None:
+    if not await check_authorized(update):
+        return
     chat_id = update.effective_chat.id
 
     if groq_client is None:
@@ -187,13 +219,54 @@ async def handle_voice(update: Update, _) -> None:
             os.unlink(tmp_path)
 
 
+async def handle_photo(update: Update, _) -> None:
+    if not await check_authorized(update):
+        return
+    chat_id = update.effective_chat.id
+
+    if chat_id in active_sessions:
+        await update.message.reply_text(
+            "A task is already running. Use /cancel to stop it first."
+        )
+        return
+
+    photo = update.message.photo[-1]
+    tg_file = await photo.get_file()
+
+    UPLOADS_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"photo_{timestamp}.jpg"
+    save_path = UPLOADS_DIR / filename
+
+    await tg_file.download_to_drive(str(save_path))
+    log.info("[photo] chat_id=%s saved=%s", chat_id, save_path)
+
+    caption = update.message.caption
+    if caption:
+        prompt = f"Regarding the image at {save_path}: {caption}"
+        await update.message.reply_text(f"Photo saved. Running Claude Code...")
+        await run_claude(update, chat_id, prompt)
+    else:
+        pending_photos[chat_id] = str(save_path)
+        await update.message.reply_text(
+            f"Photo saved to {save_path}\n"
+            "What would you like me to do with it? Send a text message with your request."
+        )
+
+
 def main() -> None:
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    log.info("Bot started. Working directory: %s", WORK_DIR)
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    Path(CLAUDE_WORK_DIR).mkdir(parents=True, exist_ok=True)
+    log.info("Bot started. Claude working directory: %s", CLAUDE_WORK_DIR)
+    if ALLOWED_USERS:
+        log.info("Access restricted to user IDs: %s", ALLOWED_USERS)
+    else:
+        log.warning("ALLOWED_USERS not set -- anyone can use this bot!")
     if groq_client:
         log.info("Voice transcription enabled (Groq Whisper)")
     else:

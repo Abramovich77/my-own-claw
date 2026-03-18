@@ -39,7 +39,9 @@ python bot.py
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | *(required)* | Bot token from BotFather |
 | `CLAUDE_BIN` | `~/.local/bin/claude` | Path to Claude Code binary |
+| `CLAUDE_WORK_DIR` | `~/workspace` | Directory where Claude Code runs (isolated from bot code) |
 | `GROQ_API_KEY` | *(optional)* | Groq API key for voice transcription ([get one free](https://console.groq.com)) |
+| `ALLOWED_USERS` | *(optional)* | Comma-separated Telegram user IDs. If not set, anyone can use the bot |
 
 ## Commands
 
@@ -49,6 +51,7 @@ python bot.py
 | `/cancel` | Stop the current Claude Code task |
 | *(any text)* | Run as a Claude Code prompt |
 | *(voice message)* | Transcribe via Groq Whisper, then run as a prompt |
+| *(photo)* | Save to `uploads/`, run caption as prompt if provided |
 
 ## Run as a Service (VM)
 

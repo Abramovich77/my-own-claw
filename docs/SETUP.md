@@ -76,6 +76,30 @@ GROQ_API_KEY=gsk_your_key_here
 
 Without this key the bot still works for text -- voice messages will just get a "not configured" reply.
 
+### Security: Restrict Access (Recommended)
+
+Add your Telegram user ID to restrict who can use the bot:
+
+```
+ALLOWED_USERS=123456789
+```
+
+Multiple users: `ALLOWED_USERS=123456789,987654321`
+
+To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot) -- it will reply with your ID.
+
+If `ALLOWED_USERS` is not set, anyone who discovers your bot can run Claude Code on your server.
+
+### Working Directory Isolation (Recommended)
+
+By default, Claude Code runs in `~/workspace` -- separate from the bot's own code and `.env` secrets. You can change this:
+
+```
+CLAUDE_WORK_DIR=/home/olegab/projects
+```
+
+Uploaded photos are saved under `CLAUDE_WORK_DIR/uploads/` so Claude can still access them.
+
 ## 5. Install Python Dependencies
 
 ```bash

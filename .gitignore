@@ -1,6 +1,7 @@
 .env
 .venv/
-LINKEDIN_DRAFT.md
+notes/
+uploads/
 __pycache__/
 *.pyc
 *.pyo
