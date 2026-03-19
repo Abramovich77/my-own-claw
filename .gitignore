@@ -2,6 +2,9 @@
 .venv/
 notes/
 uploads/
+data/
+logs/
+workspace/
 __pycache__/
 *.pyc
 *.pyo

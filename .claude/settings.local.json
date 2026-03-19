@@ -1,18 +1,44 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -m json.tool)",
-      "Bash(which node:*)",
-      "Bash(pkill:*)",
-      "Bash(curl:*)",
-      "Bash(nslookup:*)",
-      "Bash(strace:*)",
-      "Bash(timeout 30 /Users/olegab/.local/bin/claude --print --dangerously-skip-permissions 'say hi')",
-      "Bash(echo exit=$?)",
-      "Read(//tmp/**)",
-      "Bash(/Users/olegab/.local/bin/claude --print --dangerously-skip-permissions 'say hi')",
-      "Read(//private/tmp/**)",
-      "Bash(npm start:*)"
+      "Bash(python3 bot.py*)",
+      "Bash(python3 -m pytest*)",
+      "Bash(pip install*)",
+      "Bash(pkill*)",
+      "Bash(curl*)",
+      "Bash(npm start*)",
+      "Bash(journalctl*)",
+      "Bash(systemctl status claude-bot*)",
+      "Bash(tail -f logs/bot.log*)",
+      "Read(/tmp/**)",
+      "Read(/private/tmp/**)"
+    ]
+  },
+  "mcpServers": {
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "data/bot.db"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ]
+    }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(echo '$CLAUDE_TOOL_INPUT' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('file_path',''))\" 2>/dev/null); case \"$file\" in *bot.py|*db.py) echo '⚠️  Restart bot to apply changes: pkill -f bot.py && source .venv/bin/activate && python bot.py' ;; *.env.example) echo '💡 Remember to update your .env file with any new variables.' ;; esac"
+          }
+        ]
+      }
     ]
   }
 }

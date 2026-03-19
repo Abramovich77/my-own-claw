@@ -48,6 +48,7 @@ python bot.py
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message |
+| `/new` | Start a fresh conversation (clears session history) |
 | `/cancel` | Stop the current Claude Code task |
 | *(any text)* | Run as a Claude Code prompt |
 | *(voice message)* | Transcribe via Groq Whisper, then run as a prompt |
@@ -71,8 +72,34 @@ Check logs:
 journalctl -u claude-bot -f
 ```
 
+## Logs
+
+Logs are written to `logs/bot.log` with automatic rotation (5 MB per file, 5 backups kept).
+
+Useful commands:
+
+```bash
+# Follow logs in real time
+tail -f logs/bot.log
+
+# Show only errors
+grep ERROR logs/bot.log
+
+# Show errors and warnings
+grep -E 'ERROR|WARNING' logs/bot.log
+
+# Errors from today
+grep "$(date +%Y-%m-%d)" logs/bot.log | grep ERROR
+
+# Search across all rotated log files
+grep ERROR logs/bot.log*
+```
+
 ## Notes
 
+- Conversations are persistent -- Claude remembers previous messages in the same chat.
+- Use `/new` to start a fresh conversation when you want a clean slate.
 - One task runs per chat at a time. Use `/cancel` to abort.
-- Claude Code runs with `--dangerously-skip-permissions` in the project root.
+- Claude Code runs with `--dangerously-skip-permissions` in the configured working directory.
 - Long replies are automatically split into multiple messages.
+- Session data is stored in `data/bot.db` (SQLite).
