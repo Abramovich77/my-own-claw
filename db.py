@@ -32,9 +32,11 @@ def _db() -> sqlite3.Connection:
 
 
 def get_session(chat_id: int) -> str | None:
-    row = _db().execute(
-        "SELECT session_uuid FROM sessions WHERE chat_id = ?", (chat_id,)
-    ).fetchone()
+    row = (
+        _db()
+        .execute("SELECT session_uuid FROM sessions WHERE chat_id = ?", (chat_id,))
+        .fetchone()
+    )
     return row[0] if row else None
 
 
@@ -54,9 +56,11 @@ def clear_session(chat_id: int) -> None:
 
 
 def get_pending_photo(chat_id: int) -> str | None:
-    row = _db().execute(
-        "SELECT pending_photo FROM sessions WHERE chat_id = ?", (chat_id,)
-    ).fetchone()
+    row = (
+        _db()
+        .execute("SELECT pending_photo FROM sessions WHERE chat_id = ?", (chat_id,))
+        .fetchone()
+    )
     return row[0] if row else None
 
 
