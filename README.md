@@ -72,6 +72,29 @@ Check logs:
 journalctl -u claude-bot -f
 ```
 
+## Auto-Deploy (CI/CD)
+
+Every push to `main` automatically deploys to your VM via GitHub Actions.
+
+**One-time setup:**
+
+1. On your VM, allow passwordless restart:
+
+```bash
+echo "olegab ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart claude-bot" | sudo tee /etc/sudoers.d/claude-bot
+```
+
+2. In GitHub, go to **Settings > Secrets and variables > Actions** and add:
+
+| Secret | Value |
+|--------|-------|
+| `VM_HOST` | Your VM's IP or hostname |
+| `VM_USER` | SSH username (e.g. `olegab`) |
+| `VM_SSH_KEY` | Contents of your private SSH key (`~/.ssh/id_ed25519`) |
+| `VM_APP_DIR` | Absolute path to the project on the VM (e.g. `/home/olegab/my_claude_code_claw`) |
+
+After that, every `git push` to `main` will pull the code on the VM, install deps, and restart the bot.
+
 ## Logs
 
 Logs are written to `logs/bot.log` with automatic rotation (5 MB per file, 5 backups kept).
