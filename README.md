@@ -56,19 +56,18 @@ python bot.py
 
 ## Run as a Service (VM)
 
-To auto-start the bot on boot, install the systemd service:
+To auto-start the bot on boot, run from the project directory:
 
 ```bash
-# Edit claude-bot.service — set User, WorkingDirectory, ExecStart to match your VM
-sudo cp claude-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable claude-bot
-sudo systemctl start claude-bot
+sudo bash install-service.sh
 ```
+
+This auto-detects the user and paths, generates the systemd service, and starts the bot.
 
 Check logs:
 
 ```bash
+sudo systemctl status claude-bot
 journalctl -u claude-bot -f
 ```
 
