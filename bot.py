@@ -40,6 +40,7 @@ ALLOWED_USERS: set[int] = {
 groq_client = None
 if GROQ_API_KEY:
     from groq import Groq
+
     groq_client = Groq(api_key=GROQ_API_KEY)
 
 LOG_DIR = Path(BOT_DIR) / "logs"
@@ -85,7 +86,9 @@ async def check_authorized(update: Update) -> bool:
         update.effective_user.id,
         update.effective_user.username,
     )
-    await update.message.reply_text("Unauthorized. Your user ID is not in ALLOWED_USERS.")
+    await update.message.reply_text(
+        "Unauthorized. Your user ID is not in ALLOWED_USERS."
+    )
     return False
 
 
@@ -214,15 +217,23 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
     active_sessions.pop(chat_id, None)
 
     if stderr_bytes:
-        log.warning("[claude stderr] chat_id=%s: %s", chat_id, stderr_bytes.decode(errors="replace").strip())
+        log.warning(
+            "[claude stderr] chat_id=%s: %s",
+            chat_id,
+            stderr_bytes.decode(errors="replace").strip(),
+        )
 
     if proc.returncode != 0 and not is_new_session:
         log.warning("[session] --resume failed for %s, starting fresh", session_uuid)
         session_uuid = str(uuid.uuid4())
         try:
             proc = await asyncio.create_subprocess_exec(
-                CLAUDE_BIN, "--print", "--dangerously-skip-permissions",
-                "--session-id", session_uuid, prompt,
+                CLAUDE_BIN,
+                "--print",
+                "--dangerously-skip-permissions",
+                "--session-id",
+                session_uuid,
+                prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=CLAUDE_WORK_DIR,
@@ -233,7 +244,11 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
         stdout_bytes, stderr_bytes = await proc.communicate()
         active_sessions.pop(chat_id, None)
         if stderr_bytes:
-            log.warning("[claude stderr] chat_id=%s (retry): %s", chat_id, stderr_bytes.decode(errors="replace").strip())
+            log.warning(
+                "[claude stderr] chat_id=%s (retry): %s",
+                chat_id,
+                stderr_bytes.decode(errors="replace").strip(),
+            )
         is_new_session = True
 
     db.set_session(chat_id, session_uuid)
@@ -349,9 +364,7 @@ async def handle_photo(update: Update, _) -> None:
         await tg_file.download_to_drive(str(save_path))
     except Exception as exc:
         log.error("[photo] download failed: %s", exc)
-        await update.message.reply_text(
-            "Failed to save photo. Please try again."
-        )
+        await update.message.reply_text("Failed to save photo. Please try again.")
         return
     log.info("[photo] chat_id=%s saved=%s", chat_id, save_path)
 
@@ -394,13 +407,16 @@ def main() -> None:
         log.info("Voice transcription enabled (Groq Whisper)")
     else:
         log.info("Voice transcription disabled (no GROQ_API_KEY)")
+
     async def post_init(application) -> None:
-        await application.bot.set_my_commands([
-            BotCommand("start", "Welcome message"),
-            BotCommand("skills", "Show all commands and input types"),
-            BotCommand("new", "Start a fresh conversation"),
-            BotCommand("cancel", "Stop a currently running task"),
-        ])
+        await application.bot.set_my_commands(
+            [
+                BotCommand("start", "Welcome message"),
+                BotCommand("skills", "Show all commands and input types"),
+                BotCommand("new", "Start a fresh conversation"),
+                BotCommand("cancel", "Stop a currently running task"),
+            ]
+        )
 
     app.post_init = post_init
     app.run_polling()
