@@ -50,9 +50,32 @@ python bot.py
 | `/start` | Welcome message |
 | `/new` | Start a fresh conversation (clears session history) |
 | `/cancel` | Stop the current Claude Code task |
+| `/logs` | Show recent bot log entries (errors/warnings first) |
+| `/skills` | Show all commands and supported input types |
 | *(any text)* | Run as a Claude Code prompt |
 | *(voice message)* | Transcribe via Groq Whisper, then run as a prompt |
 | *(photo)* | Save to `uploads/`, run caption as prompt if provided |
+
+## Scheduling (Natural Language)
+
+The bot supports reminders and scheduled tasks through natural language -- no special commands needed.
+
+**Examples:**
+- "Remind me in 5 minutes to take a break"
+- "Every day at 9am check disk usage" (runs as a Claude Code prompt)
+- "Напомни мне в 18:00 позвонить"
+
+**How it works:**
+1. You ask for a reminder or scheduled task in plain language
+2. Claude Code detects the scheduling intent and the bot saves the job to SQLite
+3. A background scheduler checks every 60 seconds for due jobs
+4. When a job fires, the bot sends you a Telegram message automatically (no need to write anything)
+
+**Managing reminders:**
+- Ask "what reminders do I have?" or "мои напоминания" to list active jobs
+- Ask "cancel reminder #3" or "удали напоминание" to remove one
+
+Jobs persist across bot restarts. One-time reminders auto-delete after firing; daily jobs reschedule automatically.
 
 ## Run as a Service (VM)
 
@@ -122,6 +145,8 @@ grep ERROR logs/bot.log*
 - Conversations are persistent -- Claude remembers previous messages in the same chat.
 - Use `/new` to start a fresh conversation when you want a clean slate.
 - One task runs per chat at a time. Use `/cancel` to abort.
+- Commands (`/skills`, `/cancel`, `/logs`) respond instantly even while Claude Code is running.
 - Claude Code runs with `--dangerously-skip-permissions` in the configured working directory.
 - Long replies are automatically split into multiple messages.
-- Session data is stored in `data/bot.db` (SQLite).
+- Session data and scheduled jobs are stored in `data/bot.db` (SQLite).
+- A heartbeat updates the "Running Claude Code..." message every 15 seconds with elapsed time.

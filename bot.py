@@ -1,11 +1,13 @@
 import asyncio
+import json
 import logging
 import logging.handlers
 import os
+import re
 import signal
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -75,6 +77,42 @@ HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "15"))
 
 MAX_MSG_LEN = 4000
 
+SCHEDULE_INSTRUCTION = (
+    "[SYSTEM: If the user asks to schedule a reminder or recurring task, "
+    "respond normally AND add this exact line at the very end of your response:\n"
+    'SCHEDULE:{"time":"HH:MM","repeat":"once|daily","task":"description","is_claude":true|false}\n'
+    "- time must be in 24-hour HH:MM format. If the user says a relative time like "
+    "'in 5 minutes', compute the absolute time.\n"
+    "- repeat: 'once' for one-time, 'daily' for every day\n"
+    "- is_claude: true if the task should be run as a Claude Code prompt at fire time; "
+    "false for a plain text reminder\n"
+    "- task: the reminder text or the Claude prompt to execute\n"
+    "Do NOT add SCHEDULE if the user is NOT requesting a schedule.]\n\n"
+)
+
+_SCHEDULE_RE = re.compile(r"^SCHEDULE:(\{.*\})\s*$", re.MULTILINE)
+
+_REMINDER_LIST_KW = re.compile(
+    r"(reminders?|напоминани|какие задачи|scheduled|расписани|мои задачи|what.s scheduled)",
+    re.IGNORECASE,
+)
+_REMINDER_CANCEL_KW = re.compile(
+    r"(cancel\s+reminder|delete\s+reminder|отмени\s+напоминани|удали\s+(напоминани|задачу|задач))",
+    re.IGNORECASE,
+)
+
+
+def parse_schedule(output: str) -> tuple[str, dict | None]:
+    m = _SCHEDULE_RE.search(output)
+    if not m:
+        return output, None
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return output, None
+    clean = output[: m.start()].rstrip() + output[m.end() :]
+    return clean.strip(), data
+
 
 async def check_authorized(update: Update) -> bool:
     if not ALLOWED_USERS:
@@ -131,15 +169,43 @@ async def cmd_skills(update: Update, _) -> None:
         "/start — Welcome message\n"
         "/new — Start a fresh conversation (clears session)\n"
         "/cancel — Stop a currently running task\n"
+        "/logs — Show recent bot log entries\n"
         "/skills — Show this list\n"
         "\n"
         "*Supported input types:*\n"
         "• Text — sent directly to Claude Code\n"
         "• Voice — transcribed via Whisper, then sent to Claude Code\n"
         "• Photo — saved to disk, then you describe what to do with it\n"
-        "• Photo + caption — processed immediately",
+        "• Photo + caption — processed immediately\n"
+        "• Scheduling — just say it naturally:\n"
+        '  "remind me at 9am to check the server"\n'
+        '  "every day at 18:00 run disk check"',
         parse_mode="Markdown",
     )
+
+
+async def cmd_logs(update: Update, _) -> None:
+    if not await check_authorized(update):
+        return
+    log_path = LOG_DIR / "bot.log"
+    if not log_path.exists():
+        await update.message.reply_text("Log file does not exist yet.")
+        return
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as exc:
+        await update.message.reply_text(f"Failed to read log: {exc}")
+        return
+
+    errors = [l for l in lines if "[ERROR]" in l or "[WARNING]" in l]
+    if errors:
+        tail = errors[-30:]
+        header = f"Last {len(tail)} errors/warnings (of {len(errors)} total):\n\n"
+    else:
+        tail = lines[-50:]
+        header = f"Last {len(tail)} log lines (no errors found):\n\n"
+
+    await send_long(update, header + "\n".join(tail))
 
 
 async def cmd_new(update: Update, _) -> None:
@@ -179,9 +245,11 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
     if is_new_session:
         session_uuid = str(uuid.uuid4())
 
+    augmented_prompt = SCHEDULE_INSTRUCTION + prompt
+
     cmd = [CLAUDE_BIN, "--print", "--dangerously-skip-permissions"]
     cmd += ["--session-id" if is_new_session else "--resume", session_uuid]
-    cmd.append(prompt)
+    cmd.append(augmented_prompt)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -254,6 +322,27 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
     db.set_session(chat_id, session_uuid)
 
     output = stdout_bytes.decode(errors="replace").strip()
+    output, schedule_data = parse_schedule(output)
+
+    if schedule_data:
+        try:
+            fire_time = schedule_data["time"]
+            repeat = schedule_data.get("repeat", "once")
+            task = schedule_data.get("task", "")
+            is_claude = schedule_data.get("is_claude", False)
+            job_id = db.add_cron_job(
+                chat_id=chat_id,
+                fire_at_time=fire_time,
+                message=task,
+                repeat=repeat,
+                is_claude=is_claude,
+            )
+            log.info(
+                "[schedule] Created job #%d for chat_id=%s: %s at %s (%s)",
+                job_id, chat_id, task[:50], fire_time, repeat,
+            )
+        except Exception as exc:
+            log.error("[schedule] Failed to save job: %s", exc)
 
     try:
         await status_msg.delete()
@@ -268,12 +357,65 @@ async def run_claude(update: Update, chat_id: int, prompt: str) -> None:
         )
 
 
+async def _handle_reminder_list(update: Update, chat_id: int) -> bool:
+    jobs = db.get_cron_jobs(chat_id)
+    if not jobs:
+        await update.message.reply_text("No active reminders.")
+        return True
+    lines = []
+    for j in jobs:
+        kind = "Claude task" if j["is_claude"] else "Reminder"
+        lines.append(
+            f"#{j['id']} — {j['fire_at_time']} ({j['repeat']}) [{kind}]\n"
+            f"  {j['message']}"
+        )
+    await send_long(update, "Active reminders:\n\n" + "\n\n".join(lines))
+    return True
+
+
+async def _handle_reminder_cancel(update: Update, chat_id: int, text: str) -> bool:
+    nums = re.findall(r"#?(\d+)", text)
+    if nums:
+        job_id = int(nums[0])
+        jobs = db.get_cron_jobs(chat_id)
+        if any(j["id"] == job_id for j in jobs):
+            db.delete_cron_job(job_id)
+            await update.message.reply_text(f"Reminder #{job_id} deleted.")
+            return True
+        await update.message.reply_text(f"Reminder #{job_id} not found.")
+        return True
+
+    jobs = db.get_cron_jobs(chat_id)
+    if not jobs:
+        await update.message.reply_text("No active reminders to cancel.")
+        return True
+    if len(jobs) == 1:
+        db.delete_cron_job(jobs[0]["id"])
+        await update.message.reply_text(
+            f"Deleted your only reminder: {jobs[0]['message']}"
+        )
+        return True
+
+    lines = [f"#{j['id']} — {j['message']}" for j in jobs]
+    await update.message.reply_text(
+        "Which one? Specify the number:\n\n" + "\n".join(lines)
+    )
+    return True
+
+
 async def handle_message(update: Update, _) -> None:
     if not await check_authorized(update):
         return
     chat_id = update.effective_chat.id
     prompt = update.message.text
     log.info("[msg] chat_id=%s text=%r", chat_id, prompt[:80])
+
+    if _REMINDER_CANCEL_KW.search(prompt):
+        await _handle_reminder_cancel(update, chat_id, prompt)
+        return
+    if _REMINDER_LIST_KW.search(prompt):
+        await _handle_reminder_list(update, chat_id)
+        return
 
     photo_path = db.get_pending_photo(chat_id)
     if photo_path:
@@ -381,15 +523,106 @@ async def handle_photo(update: Update, _) -> None:
         )
 
 
+async def _run_claude_for_scheduler(
+    bot, chat_id: int, prompt: str
+) -> str:
+    """Run Claude Code subprocess and return output text (used by scheduler)."""
+    session_uuid = db.get_session(chat_id)
+    is_new = session_uuid is None
+    if is_new:
+        session_uuid = str(uuid.uuid4())
+
+    cmd = [CLAUDE_BIN, "--print", "--dangerously-skip-permissions"]
+    cmd += ["--session-id" if is_new else "--resume", session_uuid]
+    cmd.append(prompt)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=CLAUDE_WORK_DIR,
+        )
+    except FileNotFoundError:
+        return f"Claude Code binary not found at: {CLAUDE_BIN}"
+
+    stdout_bytes, _ = await proc.communicate()
+
+    if proc.returncode != 0 and not is_new:
+        session_uuid = str(uuid.uuid4())
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                CLAUDE_BIN, "--print", "--dangerously-skip-permissions",
+                "--session-id", session_uuid, prompt,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=CLAUDE_WORK_DIR,
+            )
+        except FileNotFoundError:
+            return f"Claude Code binary not found at: {CLAUDE_BIN}"
+        stdout_bytes, _ = await proc.communicate()
+
+    db.set_session(chat_id, session_uuid)
+    output = stdout_bytes.decode(errors="replace").strip()
+    output, _ = parse_schedule(output)
+    return output or "(no output)"
+
+
+async def scheduler_loop(app: Application) -> None:
+    """Background task: check for due cron jobs every 60 seconds."""
+    bot = app.bot
+    while True:
+        await asyncio.sleep(60)
+        try:
+            now = datetime.now().isoformat()
+            due = db.get_due_jobs(now)
+            for job in due:
+                chat_id = job["chat_id"]
+                try:
+                    if job["is_claude"]:
+                        text = await _run_claude_for_scheduler(
+                            bot, chat_id, job["message"]
+                        )
+                    else:
+                        text = f"Reminder: {job['message']}"
+
+                    for chunk in split_message(text):
+                        if chunk.strip():
+                            try:
+                                await bot.send_message(
+                                    chat_id, chunk, parse_mode="Markdown"
+                                )
+                            except Exception:
+                                await bot.send_message(chat_id, chunk)
+
+                except Exception as exc:
+                    log.error(
+                        "[scheduler] Failed to fire job #%d: %s", job["id"], exc
+                    )
+
+                if job["repeat"] == "daily":
+                    h, m = map(int, job["fire_at_time"].split(":"))
+                    tomorrow = datetime.now().replace(
+                        hour=h, minute=m, second=0, microsecond=0
+                    ) + timedelta(days=1)
+                    db.update_next_fire(job["id"], tomorrow.isoformat())
+                else:
+                    db.delete_cron_job(job["id"])
+
+        except Exception as exc:
+            log.error("[scheduler] Loop error: %s", exc)
+
+
 async def error_handler(update: object, context) -> None:
     log.error("Unhandled exception: %s", context.error)
 
 
 def main() -> None:
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("skills", cmd_skills))
     app.add_handler(CommandHandler("new", cmd_new))
+    app.add_handler(CommandHandler("logs", cmd_logs))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
@@ -415,8 +648,11 @@ def main() -> None:
                 BotCommand("skills", "Show all commands and input types"),
                 BotCommand("new", "Start a fresh conversation"),
                 BotCommand("cancel", "Stop a currently running task"),
+                BotCommand("logs", "Show recent bot log entries"),
             ]
         )
+        asyncio.create_task(scheduler_loop(application))
+        log.info("Scheduler loop started")
 
     app.post_init = post_init
     app.run_polling()
